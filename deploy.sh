@@ -16,5 +16,7 @@ gh repo view "$GH_USER/koshvia" >/dev/null 2>&1 || gh repo create koshvia --publ
 git remote get-url origin >/dev/null 2>&1 || git remote add origin "https://github.com/$GH_USER/koshvia.git"
 git push -u origin main
 gh api -X POST "repos/$GH_USER/koshvia/pages" -f "source[branch]=main" -f "source[path]=/" >/dev/null 2>&1 || echo "(Pages may already be enabled)"
+gh api -X PUT "repos/$GH_USER/koshvia/pages" -f "cname=koshvia.vyuhika.com" >/dev/null 2>&1 || true
 echo
-echo "Done. Live in 1-2 minutes at: https://$GH_USER.github.io/koshvia/"
+echo "Done. Once your GoDaddy CNAME exists, the app is at: https://koshvia.vyuhika.com"
+echo "(Meanwhile: https://$GH_USER.github.io/koshvia/ may redirect there.)"
