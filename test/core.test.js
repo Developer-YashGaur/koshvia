@@ -42,3 +42,23 @@ test('backup merge is idempotent and never overwrites', () => {
   b.txn[0].memo = 'local'; c.mergeBackup(b, bk); assert.equal(b.txn[0].memo, 'local'); assert.throws(() => c.mergeBackup(b, { app: 'x' }));
 });
 test('balance history', () => { const db = mk(); const h = c.balanceHistory(db, 'P', 'INR', 3, new Date(2026, 10, 16)); assert.deepEqual(h.map(x => x.month), ['2026-09', '2026-10', '2026-11']); assert.equal(h[2].minor, 100000); });
+
+test('budget counts only its category and rolls over unused amount', () => {
+  const db = mk(), m = c.monthString(), pm = c.prevMonth(m);
+  c.addTx(db, { env: 'P', income: false, account: 'a', amount: 30000, category: 'Rent' });
+  c.addTx(db, { env: 'P', income: false, account: 'a', amount: 5000, category: 'Travel', date: pm + '-10' });
+  const rent = { id: 'r', env: 'P', name: 'Rent', category: 'Rent', currency: 'INR', amount: 50000, period: m, rollover: 0 };
+  const travel = { id: 't', env: 'P', name: 'Travel', category: 'Travel', currency: 'INR', amount: 20000, period: m, rollover: 1 };
+  assert.equal(c.budgetSpent(db, rent), 30000); assert.equal(c.budgetSpent(db, travel), 0);
+  assert.equal(c.budgetCarry(db, travel), 15000); assert.equal(c.budgetLimit(db, travel), 35000); assert.equal(c.budgetCarry(db, rent), 0);
+});
+test('budgets are due when the stored month is old; closed ones are not', () => {
+  const db = mk(); db.budget.push({ id: '1', env: 'P', name: 'A', currency: 'INR', amount: 1, period: '2020-01' }, { id: '2', env: 'P', name: 'B', currency: 'INR', amount: 1, period: 'closed' }, { id: '3', env: 'P', name: 'C', currency: 'INR', amount: 1, period: c.monthString() });
+  assert.deepEqual(c.budgetsDue(db, 'P').map(b => b.id), ['1']); assert.equal(c.activeBudgets(db, 'P').length, 2);
+});
+test('editTx can change date and account; csv exports visible rows', () => {
+  const db = mk(); c.addTx(db, { env: 'P', income: false, account: 'a', amount: 10000, category: 'Food', memo: 'Lunch, "good"' });
+  c.editTx(db, db.txn[0], { amount: 12000, memo: 'x', category: 'Food', date: '2025-01-05', account: 'a' });
+  const v = c.visibleTxs(db, 'P'); assert.equal(v.length, 1); assert.equal(v[0].date, '2025-01-05');
+  assert.match(c.toCsv(db, 'P'), /2025-01-05","expense","Food","Bank","-120.00","INR","x"/);
+});

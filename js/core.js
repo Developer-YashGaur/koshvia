@@ -59,11 +59,11 @@ export function reverseGrp(db, grp) {
   for (const r of rows) db.txn.push({ ...r, id: uid(), memo: 'Reversal: ' + r.memo, amount: -r.amount, grp: g, reverses: grp });
   return true;
 }
-export function editTx(db, t, { amount, memo, category }) {
+export function editTx(db, t, { amount, memo, category, date, account }) {
   if (!(amount > 0)) throw new Error('Amount must be positive');
   reverseGrp(db, t.grp);
   const id = uid();
-  db.txn.push({ ...t, id, grp: id, memo, category, amount: t.amount < 0 ? -amount : amount, reverses: '' });
+  db.txn.push({ ...t, id, grp: id, memo, category, date: date || t.date, account: account || t.account, amount: t.amount < 0 ? -amount : amount, reverses: '' });
 }
 
 // ---- insights ----
@@ -86,7 +86,20 @@ export function balanceHistory(db, env, cur, n, now = new Date()) {
 }
 
 // ---- budgets & goals ----
-export const budgetSpent = (db, b, month = monthString()) => -db.txn.filter(t => t.env === b.env && t.type === 'expense' && currencyOf(db, t.account) === b.currency && t.date.startsWith(month)).reduce((s, t) => s + t.amount, 0);
+export const prevMonth = (m) => { const [y, mo] = m.split('-').map(Number); return dayString(new Date(y, mo - 2, 1)).slice(0, 7); };
+export const budgetSpent = (db, b, month = monthString()) => 0 - db.txn.filter(t => t.env === b.env && t.type === 'expense' && currencyOf(db, t.account) === b.currency && t.date.startsWith(month) && (!b.category || t.category === b.category)).reduce((s, t) => s + t.amount, 0);
+export const budgetCarry = (db, b) => b.rollover === 1 ? Math.max(0, b.amount - budgetSpent(db, b, prevMonth(monthString()))) : 0;
+export const budgetLimit = (db, b) => b.amount + budgetCarry(db, b);
+export const activeBudgets = (db, env) => db.budget.filter(b => b.env === env && b.period !== 'closed');
+export const budgetsDue = (db, env) => activeBudgets(db, env).filter(b => b.period && b.period !== monthString());
+export function budgetPace(db, b, now = new Date()) {
+  const day = now.getDate(), days = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate(), s = budgetSpent(db, b);
+  return day >= 3 && s > 0 ? Math.round(s / day * days) : null;
+}
+export function toCsv(db, env) {
+  const q = (v) => `"${String(v).replace(/"/g, '""')}"`, rows = visibleTxs(db, env);
+  return ['date,type,category,account,amount,currency,note', ...rows.map(t => [t.date, t.type, t.category, db.account.find(a => a.id === t.account)?.name ?? '', (t.amount / 10 ** decimals(currencyOf(db, t.account))).toFixed(decimals(currencyOf(db, t.account))), currencyOf(db, t.account), t.memo].map(q).join(','))].join('\n');
+}
 export function goalProgress(db, g, now = new Date()) {
   const saved = Math.max(balance(db, g.account), 0), fraction = Math.min(saved / Math.max(g.target, 1), 1);
   let monthly = null;
